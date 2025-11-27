@@ -1,0 +1,98 @@
+-- FOV Aimbot (Universal for PC/Mobile Executors)
+-- Basic: Locks onto nearest player within FOV and follows head movement
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Settings
+local FOV = 100 -- Radius of Field of View (pixels)
+local AimbotKey = Enum.KeyCode.E -- Hotkey to toggle (PC). For mobile, always on.
+local FOVCircleColor = Color3.fromRGB(0,255,0)
+local Smoothness = 0.15 -- Lower is more legit, 1 is instant
+
+-- FOV Circle (drawing on screen, ignore if executor doesn't support Drawing API)
+local DrawingLib = Drawing or nil
+local circle
+if DrawingLib then
+    circle = DrawingLib.new("Circle")
+    circle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    circle.Color = FOVCircleColor
+    circle.Radius = FOV
+    circle.Thickness = 2
+    circle.Transparency = 0.4
+    circle.Filled = false
+end
+
+-- Utility functions
+local function getClosestToMouse()
+    local closestPlayer = nil
+    local shortestDist = FOV
+
+    for _,plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(plr.Character.HumanoidRootPart.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestPlayer = plr
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+local aiming = false
+
+-- Keybind for PC executors
+if game:GetService("UserInputService").TouchEnabled then
+    -- Mobile: Always enabled (or you could hook to a Button)
+    aiming = true
+else
+    -- PC: Use keybind to toggle
+    game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == AimbotKey then
+            aiming = not aiming
+        end
+    end)
+end
+
+-- Main Loop
+game:GetService("RunService").RenderStepped:Connect(function()
+    if DrawingLib and circle then
+        circle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+        circle.Visible = aiming
+    end
+
+    if aiming then
+        local target = getClosestToMouse()
+        if target and target.Character and target.Character:FindFirstChild("Head") then
+            local head = target.Character.Head
+            local aimPos, visible = Camera:WorldToViewportPoint(head.Position)
+            if visible then
+                -- Move mouse/camera toward target (simple approach)
+                local aimVector = Vector2.new(aimPos.X, aimPos.Y)
+                local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+                local move = (aimVector - center) * Smoothness
+                
+                -- For PC: Move mouse using mouse_event or mousemoverel (only works in some executors, e.g. Synapse)
+                if mousemoverel then
+                    mousemoverel(move.X, move.Y)
+                elseif DrawingLib then
+                    -- No mousemoverel on some platforms, so we attempt to snap camera
+                    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, head.Position), Smoothness)
+                else
+                    -- Try using camera manipulation (works on most mobile/PC executors)
+                    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, head.Position), Smoothness)
+                end
+            end
+        end
+    end
+end)
+
+-- Notify
+if setclipboard then setclipboard("FOV Aimbot loaded!") end
+print("FOV Aimbot loaded! Toggle with ["..tostring(AimbotKey).."] on PC, always on for mobile.")
