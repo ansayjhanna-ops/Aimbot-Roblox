@@ -1,98 +1,370 @@
--- FOV Aimbot (Universal for PC/Mobile Executors)
--- Basic: Locks onto nearest player within FOV and follows head movement
-
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local isTouch = UserInputService.TouchEnabled
 
--- Settings
-local FOV = 100 -- Radius of Field of View (pixels)
-local AimbotKey = Enum.KeyCode.E -- Hotkey to toggle (PC). For mobile, always on.
-local FOVCircleColor = Color3.fromRGB(0,255,0)
-local Smoothness = 0.15 -- Lower is more legit, 1 is instant
+-- ==== SETTINGS ====
+local settings = {
+    FOV = 150,
+    Smoothness = 0.18,
+    AimPart = "Head",
+    AimbotEnabled = false,
+    ESPEnabled = true
+}
+local aimParts = {"Head", "HumanoidRootPart"}
+local aimPartIndex = 1
 
--- FOV Circle (drawing on screen, ignore if executor doesn't support Drawing API)
+-- ==== COLOR SCHEME & BUTTON LABELS ====
+local COLOR = {
+    Main = Color3.fromRGB(28,27,36),
+    FOV = Color3.fromRGB(100,255,100),
+    FOVSlider = Color3.fromRGB(110,220,118),
+    Smooth = Color3.fromRGB(85,180,255),
+    ON = Color3.fromRGB(50,225,90),
+    OFF = Color3.fromRGB(95,95,95),
+    ESP = Color3.fromRGB(90,180,255)
+}
+local BUTTON_LABELS = {
+    AimbotON = "AIMBOT ON",
+    AimbotOFF = "AIMBOT OFF",
+    ESPON = "ESP ON",
+    ESPOFF = "ESP OFF",
+    Head = "AIM: HEAD",
+    Body = "AIM: BODY"
+}
+
 local DrawingLib = Drawing or nil
-local circle
-if DrawingLib then
-    circle = DrawingLib.new("Circle")
-    circle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    circle.Color = FOVCircleColor
-    circle.Radius = FOV
-    circle.Thickness = 2
-    circle.Transparency = 0.4
+local ESPObjects = {}
+local circle = DrawingLib and DrawingLib.new("Circle") or nil
+if circle then
+    circle.Color = COLOR.FOV
+    circle.Thickness = 3
+    circle.Transparency = 0.32
     circle.Filled = false
+    circle.Visible = false
 end
 
--- Utility functions
-local function getClosestToMouse()
-    local closestPlayer = nil
-    local shortestDist = FOV
+-- ==== GUI ====
+local gui = Instance.new("ScreenGui")
+gui.Name = "MahiruHub"
+gui.ResetOnSpawn = false
+pcall(function() gui.Parent = game.CoreGui end)
+if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-    for _,plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 then
-            local screenPos, onScreen = Camera:WorldToViewportPoint(plr.Character.HumanoidRootPart.Position)
-            if onScreen then
-                local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestPlayer = plr
-                end
-            end
-        end
+local main = Instance.new("Frame", gui)
+main.Size = UDim2.new(0, 260, 0, 198)
+main.Position = UDim2.new(0, 13, 0, 11)
+main.BackgroundColor3 = COLOR.Main
+main.BorderSizePixel = 0
+main.Visible = true
+
+local Title = Instance.new("TextLabel", main)
+Title.Text = "Mahiru Hub"
+Title.Font = Enum.Font.GothamSemibold
+Title.TextColor3 = Color3.fromRGB(225, 242, 255)
+Title.TextSize = 20
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 13,0, 9)
+Title.Size = UDim2.new(0, 230,0, 22)
+
+-- FOV Slider
+local FOVLabel = Instance.new("TextLabel", main)
+FOVLabel.Text = "FOV"
+FOVLabel.TextColor3 = COLOR.FOV
+FOVLabel.Font = Enum.Font.Gotham
+FOVLabel.TextSize = 15
+FOVLabel.Position = UDim2.new(0,10,0,42)
+FOVLabel.Size = UDim2.new(0,40,0,18)
+FOVLabel.BackgroundTransparency = 1
+
+local FOVSliderBG = Instance.new("Frame",main)
+FOVSliderBG.BackgroundColor3 = Color3.fromRGB(52, 53, 61)
+FOVSliderBG.Position = UDim2.new(0,54,0,48)
+FOVSliderBG.Size = UDim2.new(0, 152, 0, 8)
+FOVSliderBG.BorderSizePixel = 0
+local FOVSlider = Instance.new("Frame",FOVSliderBG)
+FOVSlider.BackgroundColor3 = COLOR.FOVSlider
+FOVSlider.BorderSizePixel = 0
+FOVSlider.Name = "Slider"
+FOVSlider.Size = UDim2.new(settings.FOV/400,0,1,0)
+local FOVVal = Instance.new("TextLabel",main)
+FOVVal.Text = tostring(settings.FOV)
+FOVVal.Font = Enum.Font.GothamBold
+FOVVal.TextColor3 = COLOR.FOV
+FOVVal.TextSize = 14
+FOVVal.BackgroundTransparency = 1
+FOVVal.Position = UDim2.new(0,208,0,41)
+FOVVal.Size = UDim2.new(0,44,0,20)
+
+-- Smoothness slider
+local SmLabel = Instance.new("TextLabel", main)
+SmLabel.Text = "Smooth"
+SmLabel.TextColor3 = COLOR.Smooth
+SmLabel.Font = Enum.Font.Gotham
+SmLabel.TextSize = 15
+SmLabel.Position = UDim2.new(0,10,0,72)
+SmLabel.Size = UDim2.new(0,55,0,18)
+SmLabel.BackgroundTransparency = 1
+local SmSliderBG = Instance.new("Frame",main)
+SmSliderBG.BackgroundColor3 = Color3.fromRGB(52, 53, 61)
+SmSliderBG.Position = UDim2.new(0,54,0,78)
+SmSliderBG.Size = UDim2.new(0, 152, 0, 8)
+SmSliderBG.BorderSizePixel = 0
+local SmSlider = Instance.new("Frame",SmSliderBG)
+SmSlider.BackgroundColor3 = COLOR.Smooth
+SmSlider.BorderSizePixel = 0
+SmSlider.Name = "Slider"
+SmSlider.Size = UDim2.new((settings.Smoothness-0.01)/0.45,0,1,0)
+local SmVal = Instance.new("TextLabel",main)
+SmVal.Text = tostring(settings.Smoothness)
+SmVal.Font = Enum.Font.GothamBold
+SmVal.BackgroundTransparency = 1
+SmVal.TextColor3 = COLOR.Smooth
+SmVal.TextSize = 14
+SmVal.Position = UDim2.new(0,208,0,71)
+SmVal.Size = UDim2.new(0,44,0,20)
+
+-- TOGGLE BUTTONS (Aimbot/ESP/AimPart)
+local BUTTON_W, BUTTON_H = 107,32
+local toggleBtn, partBtn, espBtn
+toggleBtn = Instance.new("TextButton", main)
+toggleBtn.Text = BUTTON_LABELS.AimbotOFF
+toggleBtn.Font = Enum.Font.Gotham
+toggleBtn.TextSize = 16
+toggleBtn.TextColor3 = Color3.new(1,1,1)
+toggleBtn.BackgroundColor3 = COLOR.OFF
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Position = UDim2.new(0,13,0,117)
+toggleBtn.Size = UDim2.new(0,BUTTON_W,0,BUTTON_H)
+
+partBtn = Instance.new("TextButton", main)
+partBtn.Text = BUTTON_LABELS.Head
+partBtn.Font = Enum.Font.Gotham
+partBtn.TextSize = 16
+partBtn.TextColor3 = Color3.new(1,1,1)
+partBtn.BackgroundColor3 = COLOR.Smooth
+partBtn.BorderSizePixel = 0
+partBtn.Position = UDim2.new(0,137,0,117)
+partBtn.Size = UDim2.new(0,BUTTON_W,0,BUTTON_H)
+
+espBtn = Instance.new("TextButton", main)
+espBtn.Text = BUTTON_LABELS.ESPON
+espBtn.Font = Enum.Font.Gotham
+espBtn.TextSize = 15
+espBtn.TextColor3 = Color3.new(1,1,1)
+espBtn.BackgroundColor3 = COLOR.ESP
+espBtn.BorderSizePixel = 0
+espBtn.Position = UDim2.new(0,13,0,160)
+espBtn.Size = UDim2.new(0,BUTTON_W,0,BUTTON_H)
+
+-- ==== GUI INTERACTIONS & SLIDERS ====
+local fovhold, smhold = false, false
+FOVSliderBG.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        fovhold = true
     end
-    return closestPlayer
-end
+end)
+FOVSliderBG.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        fovhold = false
+    end
+end)
+SmSliderBG.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        smhold = true
+    end
+end)
+SmSliderBG.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        smhold = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if fovhold and input.Position then
+        local x = math.clamp((input.Position.X - FOVSliderBG.AbsolutePosition.X)/FOVSliderBG.AbsoluteSize.X,0,1)
+        FOVSlider.Size = UDim2.new(x,0,1,0)
+        local v = math.floor(30 + (370 * x))
+        settings.FOV = v
+        FOVVal.Text = tostring(v)
+        if circle then circle.Radius = v end
+    end
+    if smhold and input.Position then
+        local x = math.clamp((input.Position.X - SmSliderBG.AbsolutePosition.X)/SmSliderBG.AbsoluteSize.X,0,1)
+        SmSlider.Size = UDim2.new(x,0,1,0)
+        local val = math.floor((0.01 + x*0.45)*100)/100
+        settings.Smoothness = val
+        SmVal.Text = tostring(val)
+    end
+end)
 
-local aiming = false
-
--- Keybind for PC executors
-if game:GetService("UserInputService").TouchEnabled then
-    -- Mobile: Always enabled (or you could hook to a Button)
-    aiming = true
-else
-    -- PC: Use keybind to toggle
-    game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
+toggleBtn.MouseButton1Click:Connect(function()
+    settings.AimbotEnabled = not settings.AimbotEnabled
+    toggleBtn.Text = settings.AimbotEnabled and BUTTON_LABELS.AimbotON or BUTTON_LABELS.AimbotOFF
+    toggleBtn.BackgroundColor3 = settings.AimbotEnabled and COLOR.ON or COLOR.OFF
+    if circle then circle.Visible = settings.AimbotEnabled and main.Visible end
+end)
+partBtn.MouseButton1Click:Connect(function()
+    aimPartIndex = (aimPartIndex)%#aimParts + 1
+    settings.AimPart = aimParts[aimPartIndex]
+    partBtn.Text = settings.AimPart=="Head" and BUTTON_LABELS.Head or BUTTON_LABELS.Body
+    partBtn.BackgroundColor3 = settings.AimPart=="Head" and COLOR.Smooth or COLOR.FOVSlider
+end)
+espBtn.MouseButton1Click:Connect(function()
+    settings.ESPEnabled = not settings.ESPEnabled
+    espBtn.Text = settings.ESPEnabled and BUTTON_LABELS.ESPON or BUTTON_LABELS.ESPOFF
+    for _,tbl in pairs(ESPObjects) do for _,d in pairs(tbl) do if d.Remove then d:Remove() end end end
+    ESPObjects = {}
+    espBtn.BackgroundColor3 = settings.ESPEnabled and COLOR.ESP or COLOR.OFF
+end)
+if not isTouch then
+    UserInputService.InputBegan:Connect(function(input, processed)
         if processed then return end
-        if input.KeyCode == AimbotKey then
-            aiming = not aiming
+        if input.KeyCode == Enum.KeyCode.E then toggleBtn:Activate()
+        elseif input.KeyCode == Enum.KeyCode.Q then partBtn:Activate()
+        elseif input.KeyCode == Enum.KeyCode.RightShift then
+            main.Visible = not main.Visible
+            if circle then circle.Visible = settings.AimbotEnabled and main.Visible end
         end
     end)
 end
 
--- Main Loop
-game:GetService("RunService").RenderStepped:Connect(function()
-    if DrawingLib and circle then
-        circle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-        circle.Visible = aiming
-    end
-
-    if aiming then
-        local target = getClosestToMouse()
-        if target and target.Character and target.Character:FindFirstChild("Head") then
-            local head = target.Character.Head
-            local aimPos, visible = Camera:WorldToViewportPoint(head.Position)
-            if visible then
-                -- Move mouse/camera toward target (simple approach)
-                local aimVector = Vector2.new(aimPos.X, aimPos.Y)
-                local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-                local move = (aimVector - center) * Smoothness
-                
-                -- For PC: Move mouse using mouse_event or mousemoverel (only works in some executors, e.g. Synapse)
-                if mousemoverel then
-                    mousemoverel(move.X, move.Y)
-                elseif DrawingLib then
-                    -- No mousemoverel on some platforms, so we attempt to snap camera
-                    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, head.Position), Smoothness)
-                else
-                    -- Try using camera manipulation (works on most mobile/PC executors)
-                    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, head.Position), Smoothness)
+-- ==== CORE FUNCTIONALITY ====
+local function isTeammate(plr)
+    return LocalPlayer.Team and plr.Team and LocalPlayer.Team == plr.Team
+end
+local function isVisible(part)
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    local result = workspace:Raycast(origin, dir, params)
+    return (not result) or (result.Instance:IsDescendantOf(part.Parent))
+end
+function getClosest()
+    local closest, minDist = nil, settings.FOV
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild(settings.AimPart)
+            and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0
+            and not isTeammate(plr) then
+            local part = plr.Character[settings.AimPart]
+            if isVisible(part) then
+                local screen,onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screen.X, screen.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        closest = plr
+                    end
                 end
+            end
+        end
+    end
+    return closest
+end
+function drawESP(plr)
+    if not DrawingLib or not plr or not plr.Character or not plr.Character:FindFirstChild("HumanoidRootPart") or isTeammate(plr) then return end
+    local tbl = {}
+    tbl.box = DrawingLib.new("Square")
+    tbl.box.Filled = false
+    tbl.box.Color = Color3.new(1,1,1)
+    tbl.box.Thickness = 1.6
+    tbl.box.Transparency = 0.8
+    tbl.name = DrawingLib.new("Text")
+    tbl.name.Size = 13
+    tbl.name.Color = Color3.new(1,1,1)
+    tbl.name.Center = true
+    tbl.name.Outline = true
+    tbl.name.Font = 2
+    tbl.health = DrawingLib.new("Square")
+    tbl.health.Filled = true
+    tbl.health.Color = Color3.fromRGB(98,255,98)
+    tbl.health.Transparency = 0.9
+    tbl.health.Thickness = 0
+    tbl.dist = DrawingLib.new("Text")
+    tbl.dist.Size = 13
+    tbl.dist.Color = Color3.new(0.85,0.8,0.6)
+    tbl.dist.Center = true
+    tbl.dist.Outline = true
+    tbl.dist.Font = 2
+    ESPObjects[plr] = tbl
+end
+function removeESP(plr)
+    if ESPObjects[plr] then
+        for _,obj in pairs(ESPObjects[plr]) do if obj.Remove then obj:Remove() end end
+        ESPObjects[plr] = nil
+    end
+end
+RunService.RenderStepped:Connect(function()
+    if circle then
+        circle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+        circle.Radius = settings.FOV
+        circle.Visible = settings.AimbotEnabled and main.Visible
+    end
+    -- ESP
+    if settings.ESPEnabled then
+        for _,plr in pairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 and not isTeammate(plr) then
+                if not ESPObjects[plr] then drawESP(plr) end
+                local tbl = ESPObjects[plr]
+                local root = plr.Character.HumanoidRootPart
+                local hum = plr.Character.Humanoid
+                local ScreenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+                local Scale = (Camera.CFrame.Position - root.Position).Magnitude / 30
+                local boxW, boxH = math.clamp(34/Scale, 6,48), math.clamp(47/Scale,10,68)
+                if onScreen then
+                    tbl.box.Size = Vector2.new(boxW, boxH)
+                    tbl.box.Position = Vector2.new(ScreenPos.X - boxW/2, ScreenPos.Y - boxH/1.6)
+                    tbl.box.Visible = true
+                    local hpPer = math.clamp(hum.Health/hum.MaxHealth,0,1)
+                    tbl.box.Color = Color3.fromRGB(255-210*hpPer,88+210*hpPer,44+85*hpPer)
+                    tbl.health.Size = Vector2.new(4, boxH*hpPer)
+                    tbl.health.Position = Vector2.new(ScreenPos.X - boxW/2 - 7, ScreenPos.Y - boxH/1.6+boxH-boxH*hpPer)
+                    tbl.health.Visible = true
+                    tbl.health.Color = Color3.fromRGB(64+((192-64)*hpPer), 250*hpPer, 68)
+                    tbl.name.Text = plr.DisplayName
+                    tbl.name.Position = Vector2.new(ScreenPos.X, ScreenPos.Y - boxH/1.35 - 12)
+                    tbl.name.Visible = true
+                    tbl.dist.Text = tostring(math.floor((Camera.CFrame.Position-root.Position).Magnitude)).."m"
+                    tbl.dist.Position = Vector2.new(ScreenPos.X, ScreenPos.Y + boxH/2 + 6)
+                    tbl.dist.Visible = true
+                else
+                    tbl.box.Visible = false
+                    tbl.health.Visible = false
+                    tbl.name.Visible = false
+                    tbl.dist.Visible = false
+                end
+            else
+                removeESP(plr)
+            end
+        end
+    else
+        for _,plr in pairs(ESPObjects) do removeESP(plr) end
+    end
+end)
+Players.PlayerRemoving:Connect(function(plr) removeESP(plr) end)
+
+-- ==== AIMBOT ====
+RunService.RenderStepped:Connect(function()
+    if not settings.AimbotEnabled then return end
+    local tgt = getClosest()
+    if tgt and tgt.Character and tgt.Character:FindFirstChild(settings.AimPart) then
+        local part = tgt.Character[settings.AimPart]
+        local aimPos, visible = Camera:WorldToViewportPoint(part.Position)
+        if visible then
+            local aimVector = Vector2.new(aimPos.X, aimPos.Y)
+            local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+            local move = (aimVector - center) * settings.Smoothness
+            if mousemoverel then
+                mousemoverel(move.X, move.Y)
+            else
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, part.Position), settings.Smoothness)
             end
         end
     end
 end)
 
--- Notify
-if setclipboard then setclipboard("FOV Aimbot loaded!") end
-print("FOV Aimbot loaded! Toggle with ["..tostring(AimbotKey).."] on PC, always on for mobile.")
+print("Mahiru Hub loaded! [E]=Aimbot [Q]=AimPart [RightShift]=Hide/Show GUI. All controls tap/clickable.")
